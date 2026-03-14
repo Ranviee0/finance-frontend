@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -200,6 +201,7 @@ export default function CategoryPage() {
   const [selectedCategory, setSelectedCategory] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState<Date | undefined>();
   const [endDate, setEndDate] = React.useState<Date | undefined>();
+  const [checkedCategories, setCheckedCategories] = React.useState<Record<string, boolean>>({});
   const [groups, setGroups] = React.useState<CategoryGroup[]>([
     { id: "group-1", name: "Group1", colorId: GROUP_COLOR_PRESETS[0].id },
     { id: "group-2", name: "Group2", colorId: GROUP_COLOR_PRESETS[1].id },
@@ -249,9 +251,33 @@ export default function CategoryPage() {
     });
   }, [categories, groups]);
 
+  React.useEffect(() => {
+    setCheckedCategories((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const item of categories) {
+        if (prev[item.category]) next[item.category] = true;
+      }
+      return next;
+    });
+  }, [categories]);
+
   const selectedTotalExpense = React.useMemo(
     () => categories.find((item) => item.category === selectedCategory)?.total_expense ?? "-",
     [categories, selectedCategory]
+  );
+
+  const checkedTotal = React.useMemo(
+    () =>
+      categories.reduce((sum, item) => {
+        if (!checkedCategories[item.category]) return sum;
+        return sum + parseNumber(item.total_expense);
+      }, 0),
+    [categories, checkedCategories]
+  );
+
+  const checkedCount = React.useMemo(
+    () => Object.values(checkedCategories).filter(Boolean).length,
+    [checkedCategories]
   );
 
   const groupedSummaries = React.useMemo(
@@ -324,6 +350,26 @@ export default function CategoryPage() {
   const categoryColumns = React.useMemo<ColumnDef<CategoryItem>[]>(
     () => [
       {
+        id: "checked",
+        header: "",
+        cell: ({ row }) => {
+          const category = row.original.category;
+          return (
+            <Checkbox
+              checked={Boolean(checkedCategories[category])}
+              onCheckedChange={(checked) => {
+                const isChecked = Boolean(checked);
+                setCheckedCategories((prev) => ({
+                  ...prev,
+                  [category]: isChecked,
+                }));
+              }}
+              aria-label={`Select ${category}`}
+            />
+          );
+        },
+      },
+      {
         accessorKey: "category",
         header: "Category",
         cell: ({ row }) => {
@@ -354,7 +400,7 @@ export default function CategoryPage() {
         ),
       },
     ],
-    [selectedCategory]
+    [selectedCategory, checkedCategories]
   );
 
   if (categoriesLoading) {
@@ -367,13 +413,6 @@ export default function CategoryPage() {
 
   return (
     <div className="w-full max-w-[1700px] mx-auto space-y-6">
-      <Tabs defaultValue="normal" className="w-full">
-        <TabsList>
-          <TabsTrigger value="normal">Normal Table</TabsTrigger>
-          <TabsTrigger value="grouping">Category Grouping</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="normal" className="space-y-6">
           <div className="flex flex-wrap items-center gap-2">
             <DatePicker
               value={startDate}
@@ -400,6 +439,11 @@ export default function CategoryPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-1">
+              <div className="mb-2 rounded-md border px-3 py-2 text-sm">
+                <span className="font-medium">Checked total:</span>{" "}
+                {formatAmount(checkedTotal)}
+                <span className="text-muted-foreground"> ({checkedCount} selected)</span>
+              </div>
               <DataTable
                 columns={categoryColumns}
                 data={categories}
@@ -438,103 +482,6 @@ export default function CategoryPage() {
               </div>
             )}
           </div>
-        </TabsContent>
-
-        <TabsContent value="grouping" className="space-y-6">
-          <div className="rounded-lg border p-4 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Category Grouping</h2>
-              <Button variant="outline" size="sm" onClick={addGroup}>Add Group</Button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-3 font-medium">Category</th>
-                    <th className="py-2 pr-3 font-medium text-right">Amount</th>
-                    <th className="py-2 font-medium">Group</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categories.map((item) => (
-                    <tr key={item.category} className="border-b last:border-b-0">
-                      <td className="py-2 pr-3">{item.category}</td>
-                      <td className="py-2 pr-3 text-right">{item.total_expense}</td>
-                      <td className="py-2">
-                        <select
-                          value={categoryAssignments[item.category] ?? ""}
-                          onChange={(event) =>
-                            assignCategoryToGroup(item.category, event.target.value)
-                          }
-                          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                        >
-                          <option value="">Unassigned</option>
-                          {groups.map((group) => (
-                            <option key={group.id} value={group.id}>
-                              {group.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            {groupedSummaries.map(({ group, assignedCategories, total }) => {
-              const colorPreset =
-                GROUP_COLOR_PRESETS.find((preset) => preset.id === group.colorId) ??
-                GROUP_COLOR_PRESETS[0];
-
-              return (
-                <div key={group.id} className="rounded-lg border p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <input
-                      value={group.name}
-                      onChange={(event) => updateGroupName(group.id, event.target.value)}
-                      className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                    />
-                    <span className={cn("rounded-full px-3 py-0.5 text-xs font-medium ring-1", colorPreset.badgeClassName)}>
-                      Total: {formatAmount(total)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-muted-foreground">Color</span>
-                    <select
-                      value={group.colorId}
-                      onChange={(event) => updateGroupColor(group.id, event.target.value)}
-                      className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                    >
-                      {GROUP_COLOR_PRESETS.map((preset) => (
-                        <option key={preset.id} value={preset.id}>
-                          {preset.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <p className="text-sm text-muted-foreground">
-                    {assignedCategories.length
-                      ? assignedCategories.map((item) => item.category).join(", ")
-                      : "No categories assigned."}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
-          {unassignedCategories.length > 0 ? (
-            <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-              Unassigned: {unassignedCategories.map((item) => item.category).join(", ")}
-            </div>
-          ) : null}
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }
